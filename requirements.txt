@@ -1,0 +1,21 @@
+# BuBot Backend Dependencies (Python 3.10+)
+# 100% Free and Open-Source, CPU-Only Local Pipeline
+
+pypdf==5.3.1
+pdfplumber==0.11.5
+langchain-text-splitters==0.3.6
+sentence-transformers==3.4.1
+faiss-cpu==1.16.0
+transformers==4.49.0
+torch==2.11.0+cpu
+rank-bm25==0.2.2
+pandas==3.0.2
+numpy==1.26.4
+matplotlib==3.10.1
+tqdm==4.67.1
+pytest==9.1.1
+reportlab==4.4.1
+
+# Optional UI (Streamlit - for future UI step, not used in backend)
+# streamlit>=1.38.0
+
