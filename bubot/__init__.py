@@ -218,6 +218,19 @@ class RAGPipeline:
                             )
                 except Exception as exc:
                     logger.warning("Error reading PDF %s: %s", file_name, exc)
+            elif suffix in [".pptx", ".ppt"]:
+                from src.ingest import extract_pptx_slides
+                try:
+                    slide_texts = extract_pptx_slides(path)
+                    repeated_lines = detect_repeated_headers_footers(slide_texts)
+                    for idx, raw_t in enumerate(slide_texts):
+                        clean_t = clean_text(raw_t, header_footer_lines=repeated_lines)
+                        if clean_t.strip():
+                            all_new_pages.append(
+                                PageDoc(file_name=file_name, page_number=idx + 1, text=clean_t)
+                            )
+                except Exception as exc:
+                    logger.warning("Error reading presentation %s: %s", file_name, exc)
             elif suffix in [".txt", ".md"]:
                 try:
                     content = path.read_text(encoding="utf-8", errors="replace")
