@@ -1,0 +1,8 @@
+Lecture Notes: Machine Learning & Deep Learning
+
+1. Artificial Neural Networks
+Artificial neural networks consist of connected layers of nodes inspired by biological neurons. Each connection has an associated weight that determines its influence.
+
+2. Backpropagation
+Backpropagation is the foundational algorithm used to calculate gradients of the loss function with respect to network weights. It applies the chain rule of calculus backwards from the output layer through hidden layers to the input layer. These computed gradients determine how weights are updated during training using gradient descent. Automatic differentiation enables efficient backpropagation in modern deep learning frameworks.
+
