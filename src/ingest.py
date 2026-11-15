@@ -192,6 +192,63 @@ def _extract_page_with_fallback(
     return text
 
 
+def extract_pptx_slides(pptx_path: Path | str) -> List[str]:
+    """Extract text slide-by-slide from PowerPoint presentations (.pptx, .ppt).
+
+    Args:
+        pptx_path: Path to PowerPoint presentation.
+
+    Returns:
+        List of extracted slide text strings (in slide order).
+    """
+    path = Path(pptx_path).resolve()
+    if not path.exists():
+        return []
+
+    import re
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    # Standard XML-based PPTX archive
+    if zipfile.is_zipfile(path):
+        try:
+            with zipfile.ZipFile(path) as z:
+                slide_names = [n for n in z.namelist() if n.startswith("ppt/slides/slide") and n.endswith(".xml")]
+                def slide_key(n: str) -> int:
+                    m = re.search(r"slide(\d+)\.xml", n)
+                    return int(m.group(1)) if m else 0
+                slide_names.sort(key=slide_key)
+
+                slides: List[str] = []
+                for name in slide_names:
+                    root = ET.fromstring(z.read(name))
+                    paras: List[str] = []
+                    for elem in root.iter():
+                        if elem.tag.endswith("}p") or elem.tag == "p":
+                            p_text = "".join(
+                                t.text for t in elem.iter()
+                                if (t.tag.endswith("}t") or t.tag == "t") and t.text
+                            )
+                            if p_text.strip():
+                                paras.append(p_text.strip())
+                    slides.append("\n".join(paras))
+                return slides
+        except Exception as exc:
+            logger.warning("Failed to parse PPTX XML in %s: %s", path.name, exc)
+
+    # Fallback for binary .ppt files
+    try:
+        raw_bytes = path.read_bytes()
+        matches = re.findall(rb"[\x20-\x7E\t\r\n]{6,}", raw_bytes)
+        text = "\n".join(m.decode("ascii", errors="ignore").strip() for m in matches if len(m.decode("ascii", errors="ignore").strip()) > 10)
+        if text.strip():
+            return [text]
+    except Exception as exc:
+        logger.warning("Binary fallback extraction failed for %s: %s", path.name, exc)
+
+    return []
+
+
 def load_pdfs(data_dir: Path | str, config: Optional[Config] = None) -> List[PageDoc]:
     """Scan data_dir and load all PDF pages into PageDoc instances.
 
@@ -210,8 +267,9 @@ def load_pdfs(data_dir: Path | str, config: Optional[Config] = None) -> List[Pag
         return []
 
     pdf_files = sorted([p for p in dir_path.glob("*.[pP][dD][fF]") if p.is_file()])
-    if not pdf_files:
-        logger.warning("No PDF files found in directory: %s", dir_path)
+    ppt_files = sorted([p for p in dir_path.glob("*.[pP][pP][tT]*") if p.is_file()])
+    if not pdf_files and not ppt_files:
+        logger.warning("No PDF or presentation files found in directory: %s", dir_path)
         return []
 
     from pypdf import PdfReader
@@ -265,7 +323,23 @@ def load_pdfs(data_dir: Path | str, config: Optional[Config] = None) -> List[Pag
             logger.error("Failed to parse PDF %s: %s. Skipping corrupted or unsupported file.", file_name, exc)
             continue
 
-    logger.info("Total PageDocs loaded across all PDFs: %d", len(all_pages))
+    # Also parse PowerPoint presentations (.pptx, .ppt)
+    for ppt_path in ppt_files:
+        file_name = ppt_path.name
+        try:
+            slide_texts = extract_pptx_slides(ppt_path)
+            if not slide_texts:
+                continue
+            header_footers = detect_repeated_headers_footers(slide_texts, threshold_ratio=0.5)
+            for i, raw_text in enumerate(slide_texts):
+                cleaned = clean_text(raw_text, header_footer_lines=header_footers)
+                if cleaned:
+                    all_pages.append(PageDoc(file_name=file_name, page_number=i + 1, text=cleaned))
+            logger.info("Loaded %s: %d slides parsed.", file_name, len(slide_texts))
+        except Exception as exc:
+            logger.error("Failed to parse presentation %s: %s", file_name, exc)
+
+    logger.info("Total PageDocs loaded across all documents: %d", len(all_pages))
     return all_pages
 
 
