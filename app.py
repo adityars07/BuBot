@@ -41,7 +41,7 @@ st.markdown(
     main [data-testid="stFileUploaderDropzone"], [data-testid="stMain"] [data-testid="stFileUploaderDropzone"] { background-color: #FFFFFF !important; border: 1.5px dashed #9A9788 !important; border-radius: 20px !important; padding: 40px 24px !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; text-align: center !important; }
     main [data-testid="stFileUploaderDropzone"]::before, [data-testid="stMain"] [data-testid="stFileUploaderDropzone"]::before { content: ""; display: block; width: 52px; height: 52px; background-color: #E2F0EC; border-radius: 14px; margin-bottom: 14px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 24 24' fill='none' stroke='%230F6E5E' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpolyline points='17 8 12 3 7 8'/%3E%3Cline x1='12' y1='3' x2='12' y2='15'/%3E%3C/svg%3E"); background-position: center; background-repeat: no-repeat; order: 1; }
     main [data-testid="stFileUploaderDropzoneInstructions"], [data-testid="stMain"] [data-testid="stFileUploaderDropzoneInstructions"] { display: flex !important; flex-direction: column !important; align-items: center !important; order: 2 !important; margin-bottom: 18px !important; }
-    main [data-testid="stFileUploaderDropzoneInstructions"]::before, [data-testid="stMain"] [data-testid="stFileUploaderDropzoneInstructions"]::before { content: "Drop your PDFs here" !important; font-size: 17px !important; font-weight: 600 !important; color: #16181D !important; margin-bottom: 4px !important; }
+    main [data-testid="stFileUploaderDropzoneInstructions"]::before, [data-testid="stMain"] [data-testid="stFileUploaderDropzoneInstructions"]::before { content: "Drop your PDFs or slides here" !important; font-size: 17px !important; font-weight: 600 !important; color: #16181D !important; margin-bottom: 4px !important; }
     main [data-testid="stFileUploaderDropzoneInstructions"]::after, [data-testid="stMain"] [data-testid="stFileUploaderDropzoneInstructions"]::after { content: "or choose files from your computer" !important; font-size: 14px !important; color: #5B606B !important; }
     main [data-testid="stFileUploaderDropzoneInstructions"] > div, [data-testid="stMain"] [data-testid="stFileUploaderDropzoneInstructions"] > div { display: none !important; }
     main [data-testid="stFileUploaderDropzone"] > span:has(button), [data-testid="stMain"] [data-testid="stFileUploaderDropzone"] > span:has(button) { order: 3 !important; }
@@ -156,7 +156,7 @@ with st.sidebar:
                     pipeline.remove_document(fname)
                     st.rerun()
         # Defect 2: Sidebar uploader only once documents exist
-        sb_files = st.file_uploader("Add documents", type=["pdf", "txt", "md"], accept_multiple_files=True, key="sidebar_uploader", label_visibility="collapsed")
+        sb_files = st.file_uploader("Add documents", type=["pdf", "pptx", "ppt", "txt", "md"], accept_multiple_files=True, key="sidebar_uploader", label_visibility="collapsed")
         if sb_files:
             index_files(sb_files)
 
@@ -180,11 +180,11 @@ with st.sidebar:
 # Main Area (Defects 1, 8, 9)
 if len(pipeline.store) == 0:
     st.markdown('<h1 style="font-size:44px; margin-bottom:6px; line-height:1.15;">Ask your notes anything.</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="font-size:15px; color:#5B606B; margin-bottom:24px;">Upload your course PDFs and BuBot answers from them only, with the exact source shown for every answer. If it isn\'t in your notes, it tells you.</p>', unsafe_allow_html=True)
-    main_files = st.file_uploader("Upload files", type=["pdf", "txt", "md"], accept_multiple_files=True, key="main_uploader", label_visibility="collapsed")
+    st.markdown('<p style="font-size:15px; color:#5B606B; margin-bottom:24px;">Upload your course PDFs or slides and BuBot answers from them only, with the exact source shown for every answer. If it isn\'t in your notes, it tells you.</p>', unsafe_allow_html=True)
+    main_files = st.file_uploader("Upload files", type=["pdf", "pptx", "ppt", "txt", "md"], accept_multiple_files=True, key="main_uploader", label_visibility="collapsed")
     if main_files: index_files(main_files)
     col1, col2, col3 = st.columns(3)
-    with col1: st.markdown('<div class="step-card"><span class="step-num">1</span><div class="step-title">Upload</div><div class="step-desc">Add notes, slides or textbook chapters as PDFs.</div></div>', unsafe_allow_html=True)
+    with col1: st.markdown('<div class="step-card"><span class="step-num">1</span><div class="step-title">Upload</div><div class="step-desc">Add notes, slides or textbook chapters as PDFs or PPTs.</div></div>', unsafe_allow_html=True)
     with col2: st.markdown('<div class="step-card"><span class="step-num">2</span><div class="step-title">Index</div><div class="step-desc">BuBot splits the text and builds a searchable index.</div></div>', unsafe_allow_html=True)
     with col3: st.markdown('<div class="step-card"><span class="step-num">3</span><div class="step-title">Ask</div><div class="step-desc">Get answers grounded in your own material.</div></div>', unsafe_allow_html=True)
 
