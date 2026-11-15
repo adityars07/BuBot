@@ -9,6 +9,7 @@ from src.ingest import (
     chunk_pages,
     clean_text,
     detect_repeated_headers_footers,
+    extract_pptx_slides,
     load_pdfs,
 )
 
@@ -112,4 +113,54 @@ def test_empty_or_corrupt_pdf_does_not_crash(tmp_path: Path) -> None:
     pages = load_pdfs(tmp_path, config=cfg)
     # Should skip corrupt/empty without raising unhandled exceptions
     assert isinstance(pages, list)
+
+
+def test_pptx_extraction_and_chunking(tmp_path: Path) -> None:
+    """Verify PowerPoint presentations (.pptx) extract slides and chunk per slide."""
+    import io
+    import zipfile
+
+    slide1_xml = """<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+    <p:sld xmlns:p='http://schemas.openxmlformats.org/presentationml/2006/main' xmlns:a='http://schemas.openxmlformats.org/drawingml/2006/main'>
+      <p:cSld><p:spTree><p:sp><p:txBody>
+        <a:p><a:r><a:t>Lecture 1: Convolutional Neural Networks and Filters</a:t></a:r></a:p>
+        <a:p><a:r><a:t>Feature maps capture spatial hierarchies in images.</a:t></a:r></a:p>
+      </p:txBody></p:sp></p:spTree></p:cSld>
+    </p:sld>"""
+
+    slide2_xml = """<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+    <p:sld xmlns:p='http://schemas.openxmlformats.org/presentationml/2006/main' xmlns:a='http://schemas.openxmlformats.org/drawingml/2006/main'>
+      <p:cSld><p:spTree><p:sp><p:txBody>
+        <a:p><a:r><a:t>Backpropagation Algorithm in Deep Learning</a:t></a:r></a:p>
+        <a:p><a:r><a:t>Computes gradients of loss using calculus chain rule backwards.</a:t></a:r></a:p>
+      </p:txBody></p:sp></p:spTree></p:cSld>
+    </p:sld>"""
+
+    pptx_file = tmp_path / "deep_learning.pptx"
+    with zipfile.ZipFile(pptx_file, "w") as z:
+        z.writestr("ppt/slides/slide1.xml", slide1_xml)
+        z.writestr("ppt/slides/slide2.xml", slide2_xml)
+
+    # 1. Test raw slide extraction
+    slides = extract_pptx_slides(pptx_file)
+    assert len(slides) == 2
+    assert "Convolutional Neural Networks" in slides[0]
+    assert "Backpropagation Algorithm" in slides[1]
+
+    # 2. Test loading via load_pdfs directory scanner
+    pages = load_pdfs(tmp_path)
+    assert len(pages) == 2
+    assert [p.page_number for p in pages] == [1, 2]
+    assert pages[0].file_name == "deep_learning.pptx"
+    assert pages[1].file_name == "deep_learning.pptx"
+
+    # 3. Test chunking never crosses slides
+    chunks = chunk_pages(pages, chunk_size=50, overlap=10, min_chunk_chars=10)
+    assert len(chunks) >= 2
+    for c in chunks:
+        assert c.file_name == "deep_learning.pptx"
+        if c.page_number == 1:
+            assert "Backpropagation" not in c.text
+        elif c.page_number == 2:
+            assert "Convolutional" not in c.text
 
