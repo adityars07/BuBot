@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from src.config import DEFAULT_CONFIG, Config
 from src.index import IndexArtifacts, build_index, get_embedding_model, load_index
-from src.ingest import Chunk, PageDoc, chunk_pages, clean_text, load_pdfs
+from src.ingest import Chunk, PageDoc, chunk_pages, clean_text, detect_repeated_headers_footers, load_pdfs
 from src.rag import BuBot
 
 logger = logging.getLogger(__name__)
@@ -120,7 +120,7 @@ class RAGPipeline:
         self.top_k = settings.top_k
         self.threshold = settings.effective_threshold
         self.embedder = EmbedderInfo(name=DEFAULT_CONFIG.EMBED_MODEL.split("/")[-1])
-        self.generator: Optional[str] = None if settings.backend == "lite" else DEFAULT_CONFIG.GEN_MODEL.split("/")[-1]
+        self._generator: Optional[str] = None if settings.backend == "lite" else DEFAULT_CONFIG.GEN_MODEL.split("/")[-1]
 
         # Internal BuBot bot instance
         self._cfg = Config(
@@ -135,6 +135,21 @@ class RAGPipeline:
         # Load existing index if available
         self._load_existing_store()
         self.store = DocumentStore(self._chunks)
+
+    @property
+    def generator(self) -> Optional[str]:
+        """Dynamically return active generator name (Gemini if available, else local or None)."""
+        try:
+            from src import gemini_gen
+            if gemini_gen.is_available():
+                return f"Google Gemini ({gemini_gen.get_model_name()})"
+        except Exception:
+            pass
+        return self._generator
+
+    @generator.setter
+    def generator(self, value: Optional[str]) -> None:
+        self._generator = value
 
     def _load_existing_store(self) -> None:
         """Attempt loading existing index store from disk."""
@@ -193,7 +208,7 @@ class RAGPipeline:
             if suffix == ".pdf":
                 # PDF parsing using existing ingest engine
                 from pypdf import PdfReader
-                from src.ingest import _extract_page_with_fallback, detect_repeated_headers_footers
+                from src.ingest import _extract_page_with_fallback
 
                 try:
                     reader = PdfReader(str(path))
@@ -338,11 +353,30 @@ class RAGPipeline:
                 latency_s=round(latency, 4),
             )
 
-        # Lite backend (no neural generator) -> extractive best passage
-        if self.generator is None:
+        # 1. First attempt generation with Google Gemini (ChatGPT-style tutor response)
+        try:
+            from src import gemini_gen
+            if gemini_gen.is_available():
+                gemini_text = gemini_gen.generate_answer([s.to_dict() for s in sources], question)
+                if gemini_text:
+                    latency = time.perf_counter() - start_time
+                    return Answer(
+                        text=gemini_text,
+                        sources=sources,
+                        refused=False,
+                        reason=None,
+                        top_score=round(top_score, 4),
+                        latency_s=round(latency, 4),
+                    )
+        except Exception as exc:
+            logger.warning("Gemini generation attempt failed: %s", exc)
+
+        # 2. Lite backend or fallback when no external LLM is configured
+        if self._generator is None:
             latency = time.perf_counter() - start_time
+            synthesized = self._synthesize_passages(sources, question)
             return Answer(
-                text=sources[0].text,
+                text=synthesized,
                 sources=sources,
                 refused=False,
                 reason=None,
@@ -350,7 +384,7 @@ class RAGPipeline:
                 latency_s=round(latency, 4),
             )
 
-        # Full backend -> generate with flan-t5
+        # 3. Full backend -> generate with flan-t5
         bot_ans = bot.answer(question)
         final_sources = [
             Source(source=s.file_name, page=s.page_number, text=s.text, score=float(s.score))
@@ -366,4 +400,29 @@ class RAGPipeline:
             top_score=round(bot_ans.top_score, 4),
             latency_s=round(bot_ans.latency_s, 4),
         )
+
+    def _synthesize_passages(self, sources: List[Source], question: str) -> str:
+        """Provide a clean, structured multi-slide summary when LLM is offline or busy."""
+        lines: List[str] = []
+        content_sources = [s for s in sources if not (s.text.strip().lower().startswith("references http") or s.text.strip().lower().startswith("http"))]
+        ordered_sources = content_sources if content_sources else sources
+
+        lines.append(f"Here is what your course notes and slides contain regarding **{question.strip()}**:\n")
+        for s in ordered_sources:
+            label = f"Slide {s.page}" if s.source.endswith((".pptx", ".ppt")) else f"Page {s.page}"
+            lines.append(f"**From {s.source} ({label}) — Match {s.score:.2f}:**")
+            for para in s.text.split("\n"):
+                if para.strip():
+                    lines.append(f"> {para.strip()}")
+            lines.append("")
+
+        try:
+            from src import gemini_gen
+            if gemini_gen.is_available():
+                lines.append("---\n*⚡ (AI response timed out; direct slide passages shown above. You can ask again.)*")
+            else:
+                lines.append("---\n*💡 For full ChatGPT-style conversational explanations with step-by-step math and problem solving, add your free Gemini API key in the sidebar under Settings.*")
+        except Exception:
+            pass
+        return "\n".join(lines)
 

@@ -10,6 +10,11 @@ env/
 venv/
 .venv/
 
+# Environment and Secrets
+.env
+*.env
+.env.local
+
 # BuBot Index Store and Generated Cache
 index_store/
 models/
