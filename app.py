@@ -147,7 +147,7 @@ with st.sidebar:
     if new_key != curr_key:
         gemini_gen.set_api_key(new_key)
         st.rerun()
-    gen_label = pipeline.generator if pipeline.generator else "none (shows slide passages)"
+    gen_label = pipeline.generator if pipeline.generator else "none (shows best passage)"
     st.markdown(f"""<div class="bubot-pipeline-card">
         <div style="font-size:11px;font-weight:700;color:#5B606B;letter-spacing:0.05em;margin-bottom:6px;">PIPELINE</div>
         <div class="pipeline-row"><span>Embeddings</span><b>{pipeline.embedder.name}</b></div>
@@ -187,7 +187,7 @@ else:
                                 st.markdown(render_match_bar(s["score"]), unsafe_allow_html=True)
                                 st.write(s["text"])
                 else:
-                    st.write(msg["content"])
+                    st.markdown(msg["content"])
                     if msg.get("sources"):
                         st.caption("SOURCES")
                         for idx, s in enumerate(msg["sources"], 1):
