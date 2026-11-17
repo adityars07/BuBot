@@ -334,7 +334,12 @@ class RAGPipeline:
             )
 
         bot = self._get_bot()
-        raw_sources = bot.retrieve(question, k=self.top_k)
+        # Retrieve extra candidate chunks so reference URLs do not crowd out numerical/content slides
+        candidate_k = max(self.top_k, 6)
+        raw_candidates = bot.retrieve(question, k=candidate_k)
+        
+        # UI sources conform to user's top_k
+        raw_sources = raw_candidates[:self.top_k]
         sources: List[Source] = [
             Source(source=s.file_name, page=s.page_number, text=s.text, score=float(s.score))
             for s in raw_sources
@@ -357,7 +362,11 @@ class RAGPipeline:
         try:
             from src import gemini_gen
             if gemini_gen.is_available():
-                gemini_text = gemini_gen.generate_answer([s.to_dict() for s in sources], question)
+                candidate_chunks = [
+                    {"file_name": s.file_name, "page_number": s.page_number, "text": s.text}
+                    for s in raw_candidates
+                ]
+                gemini_text = gemini_gen.generate_answer(candidate_chunks, question)
                 if gemini_text:
                     latency = time.perf_counter() - start_time
                     return Answer(
@@ -371,8 +380,14 @@ class RAGPipeline:
         except Exception as exc:
             logger.warning("Gemini generation attempt failed: %s", exc)
 
-        # 2. Lite backend or fallback when no external LLM is configured
-        if self._generator is None:
+        # 2. Lite backend or fallback when Gemini is unavailable/busy
+        try:
+            from src import gemini_gen
+            gemini_configured = gemini_gen.is_available()
+        except Exception:
+            gemini_configured = False
+
+        if gemini_configured or self._generator is None:
             latency = time.perf_counter() - start_time
             synthesized = self._synthesize_passages(sources, question)
             return Answer(
@@ -419,7 +434,7 @@ class RAGPipeline:
         try:
             from src import gemini_gen
             if gemini_gen.is_available():
-                lines.append("---\n*⚡ (AI response timed out; direct slide passages shown above. You can ask again.)*")
+                lines.append("---\n*(Note: Live AI tutor generation timed out; direct slide excerpts shown above. Please ask again.)*")
             else:
                 lines.append("---\n*💡 For full ChatGPT-style conversational explanations with step-by-step math and problem solving, add your free Gemini API key in the sidebar under Settings.*")
         except Exception:
