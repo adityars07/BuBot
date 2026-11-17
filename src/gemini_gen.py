@@ -1,13 +1,14 @@
 """Fast Gemini API generator for BuBot RAG pipeline.
 
-Optimized for ultra-fast 3-5 second ChatGPT-style answers using
-gemini-3.5-flash-lite and HTTP connection pooling.
+Optimized for ultra-fast ChatGPT/Claude-grade academic tutoring with complete
+step-by-step numerical problem solving and intuitive explanations using gemini-3.5-flash-lite.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -18,16 +19,35 @@ logger = logging.getLogger(__name__)
 # Persistent session for HTTP keep-alive connection reuse (saves ~1-2s per call)
 _SESSION = requests.Session()
 
-SYSTEM_PROMPT = """You are BuBot, a brilliant, fast, and thorough course tutor.
-Provide a clear, high-quality, ChatGPT-grade explanation based on the provided slide/note passages.
+SYSTEM_PROMPT = """You are BuBot, an intelligent academic tutor.
 
-Guidelines:
-1. Direct & Punchy: Explain core concepts clearly and concisely without unnecessary filler.
-2. Math & Problem Solving: If slides contain calculations (e.g. forward pass, loss, gradients, weight updates), show the formulas and step-by-step numbers clearly.
-3. Quizzes & Questions: If asked about a quiz or problem from slides, state the correct answer and explain why it is correct.
-4. Slide Citations: Cite exact slide numbers (e.g., [Slide 3], [Slide 7]) throughout your explanation.
-5. Structure: Use bold headers, bullet points, and clean formatting for quick reading.
-6. End with a 1-line list of consulted slides."""
+Your responsibility is to explain academic concepts clearly, accurately, and thoroughly using the user's uploaded course materials.
+
+You must use the retrieved course material as your primary source of truth.
+
+Do not simply copy retrieved passages. Understand the relevant information and synthesize it into a coherent educational explanation.
+
+When the user requests an example, provide a worked example.
+
+When the user requests a numerical solution, show the complete calculation process, including formulas, substitutions, intermediate values, and the final answer.
+
+When the user requests a step-by-step explanation, organize the response into clearly numbered steps.
+
+When the question involves mathematical concepts, use correctly formatted mathematical notation in LaTeX ($...$ inline, $$...$$ block).
+
+Explain technical terminology before using it extensively.
+
+If the uploaded material contains sufficient information, answer the question completely rather than refusing simply because the question uses different wording from the source.
+
+You may use basic mathematical reasoning to explain or derive results from formulas and facts present in the uploaded material. Clearly distinguish derived calculations from directly stated material.
+
+Never invent facts, formulas, numerical values, or course-specific claims that are unsupported by the retrieved context.
+
+If essential information is genuinely missing, explain exactly what is missing and provide the parts that can be answered from the available material.
+
+Always include relevant source citations using the original file name and page or slide number at the end of the explanation.
+
+Your objective is to help students understand concepts, not merely retrieve text."""
 
 
 def get_api_key() -> str:
@@ -78,20 +98,94 @@ def get_model_name() -> str:
     return os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 
+def classify_query_intent(question: str) -> str:
+    """Classify user query into academic pedagogical intent categories."""
+    q = question.lower().strip()
+    if any(w in q for w in ["numerical", "solve", "calculate", "calculation", "compute", "arithmetic", "step-by-step numerical", "step by step numerical"]):
+        return "numerical_problem"
+    if any(w in q for w in ["with an example", "with example", "give an example", "worked example", "show an example", "illustrate with"]):
+        return "explain_with_example"
+    if any(w in q for w in ["difference between", "differentiate", "compare", "versus", "vs.", " vs ", "contrast"]):
+        return "comparison"
+    if any(w in q for w in ["what is", "define", "definition", "explain", "how does", "describe", "overview"]):
+        return "conceptual"
+    return "factual"
+
+
 def build_gemini_prompt(context_chunks: List[Dict[str, Any]], question: str) -> str:
-    """Construct prompt with concise, rich slide context."""
+    """Construct prompt with substantive, rich slide context, filtering pure link slides."""
+    substantive_chunks = []
+    link_chunks = []
+    for chunk in context_chunks:
+        text = chunk.get("text", "").strip()
+        if text.lower().startswith(("references http", "http://", "https://")) and len(text.split()) < 8:
+            link_chunks.append(chunk)
+        else:
+            substantive_chunks.append(chunk)
+
+    # Prioritize content-rich slides, passing up to 6 chunks for complete context
+    selected_chunks = (substantive_chunks + link_chunks)[:6]
+
     context_parts = []
-    for chunk in context_chunks[:4]:
+    for chunk in selected_chunks:
         fname = chunk.get("file_name", chunk.get("source", "unknown"))
         page = chunk.get("page_number", chunk.get("page", "?"))
         text = chunk.get("text", "").strip()
         context_parts.append(f"[{fname} | Slide {page}]\n{text}\n")
 
     context_str = "\n".join(context_parts)
+    intent = classify_query_intent(question)
+
+    if intent == "numerical_problem":
+        format_guide = (
+            "Required Structure for Numerical Solution:\n"
+            "1. Given Parameters: State all inputs, weights, biases, targets, and learning rates directly from the excerpts.\n"
+            "2. Required Result: Clearly define what value/weights need to be calculated.\n"
+            "3. Governing Formulas: Write each formula in clean LaTeX blocks ($$...$$).\n"
+            "4. Step-by-Step Derivation & Calculations: Show full numerical substitution and compute all intermediate values step-by-step (e.g. Forward Pass net inputs and activations, Error calculation, Backward Pass chain rule gradients, and Weight updates).\n"
+            "5. Final Result & Verification: Conclude with the updated values and verify error reduction.\n"
+            "6. Sources: State the consulted slides at the end."
+        )
+    elif intent == "explain_with_example":
+        format_guide = (
+            "Required Structure for Explain with Example:\n"
+            "1. Concept Introduction: Explain the concept with a clear, intuitive real-world analogy.\n"
+            "2. Working Mechanism: Explain how the process works conceptually.\n"
+            "3. Relevant Equations: State the key governing mathematical equations.\n"
+            "4. Concrete Worked Example: Provide a clear worked example using the values/figures from the course excerpts.\n"
+            "5. Step-by-Step Explanation: Break down each phase clearly.\n"
+            "6. Final Conclusion & Key Takeaways.\n"
+            "7. Sources: State the consulted slides at the end."
+        )
+    elif intent == "comparison":
+        format_guide = (
+            "Required Structure for Comparison:\n"
+            "1. Brief Introduction of both concepts.\n"
+            "2. Markdown Comparison Table across key criteria (purpose, mechanism, convergence, speed, practical trade-offs).\n"
+            "3. Detailed Comparative Analysis.\n"
+            "4. Practical Example or context from the notes.\n"
+            "5. Key Differences Summary.\n"
+            "6. Sources: State the consulted slides at the end."
+        )
+    elif intent == "conceptual":
+        format_guide = (
+            "Required Structure for Conceptual Question:\n"
+            "1. Simple Definition.\n"
+            "2. Why it is Needed (problem it addresses).\n"
+            "3. How it Works (mechanics and stages).\n"
+            "4. Important Terminology explained simply.\n"
+            "5. Small Illustrative Example.\n"
+            "6. Summary.\n"
+            "7. Sources: State the consulted slides at the end."
+        )
+    else:
+        format_guide = "Provide a direct, accurate, and concise answer grounded in the course excerpts, citing sources at the end."
+
     return (
-        f"Course Material Excerpts:\n{context_str}\n"
-        f"Question: {question.strip()}\n\n"
-        f"Answer clearly, solve any math/quizzes mentioned, and cite slide numbers."
+        f"Course Context from Slides/Notes:\n{context_str}\n\n"
+        f"Student Question: {question.strip()}\n\n"
+        f"{format_guide}\n\n"
+        f"Ensure all calculations are completely carried out, numbers substituted, and explanations fully self-contained."
     )
 
 
@@ -100,16 +194,16 @@ def generate_answer(
     question: str,
     preferred_model: Optional[str] = None,
 ) -> Optional[str]:
-    """Generate detailed answer in 3-5 seconds using ultra-fast flash-lite models."""
+    """Generate detailed, complete academic answer using fast flash-lite models."""
     api_key = get_api_key()
     if not api_key:
         return None
 
-    # Ultra-fast models ordered by speed and availability
+    # Fast models ordered by capability and availability
     models_to_try = [
         preferred_model or get_model_name(),
         "gemini-3.5-flash-lite",
-        "gemma-4-26b-a4b-it",
+        "gemini-flash-lite-latest",
     ]
     seen = set()
     candidate_models = [m for m in models_to_try if m and not (m in seen or seen.add(m))]
@@ -120,7 +214,7 @@ def generate_answer(
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.2,
-            "maxOutputTokens": 500,
+            "maxOutputTokens": 4000,
         },
     }
 
@@ -129,15 +223,17 @@ def generate_answer(
     for model_name in candidate_models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         try:
-            # 8.0s timeout gives ample headroom for cellular/Wi-Fi latency while staying responsive
-            resp = _SESSION.post(url, headers=headers, json=payload, timeout=8.0)
+            # 25.0s timeout ensures full mathematical derivations finish safely even on high network load
+            resp = _SESSION.post(url, headers=headers, json=payload, timeout=25.0)
             if resp.status_code == 200:
                 data = resp.json()
                 candidates = data.get("candidates", [])
                 if candidates:
                     parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts and "text" in parts[0]:
-                        return parts[0]["text"].strip()
+                    text_parts = [p.get("text", "") for p in parts if "text" in p]
+                    full_text = "".join(text_parts).strip()
+                    if full_text:
+                        return full_text
             elif resp.status_code in (404, 503, 429):
                 logger.info("Model %s returned %d, trying fallback...", model_name, resp.status_code)
                 continue
