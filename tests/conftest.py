@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+# Pre-import torch and faiss to initialize OpenMP cleanly on Windows
+try:
+    import torch
+    import faiss
+except Exception:
+    pass
+
 from pathlib import Path
 import pytest
 from reportlab.lib.pagesizes import letter
