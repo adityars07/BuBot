@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 def get_embedding_model(model_name: str):
     """Load and cache SentenceTransformer model instance (singleton pattern).
 
+    Prefers locally cached weights for instant offline loading without network latency.
+
     Args:
         model_name: HuggingFace model identifier or local path.
 
@@ -41,7 +43,10 @@ def get_embedding_model(model_name: str):
     logger.info("Loading embedding model into memory: %s", model_name)
     from sentence_transformers import SentenceTransformer
 
-    return SentenceTransformer(model_name)
+    try:
+        return SentenceTransformer(model_name, local_files_only=True)
+    except Exception:
+        return SentenceTransformer(model_name)
 
 
 def compute_pdf_fingerprint(data_dir: Path | str) -> str:
