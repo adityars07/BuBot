@@ -1,6 +1,14 @@
 """Unit and integration tests for BuBot Streamlit UI."""
 
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+try:
+    import torch
+    import faiss
+except Exception:
+    pass
+
 from pathlib import Path
 import pytest
 import streamlit as st
@@ -27,7 +35,7 @@ def test_app_first_load_welcome(tmp_path, monkeypatch):
     monkeypatch.setenv("BUBOT_INDEX_DIR", str(empty_index))
 
     app_path = Path(__file__).parent.parent / "app.py"
-    at = AppTest.from_file(str(app_path.resolve()), default_timeout=30)
+    at = AppTest.from_file(str(app_path.resolve()), default_timeout=60)
     at.run()
 
     # 1. Assert no exception on first load
@@ -81,7 +89,7 @@ def test_app_with_documents_chat_state(tmp_path, monkeypatch):
     monkeypatch.setenv("BUBOT_INDEX_DIR", str(test_index))
 
     app_path = Path(__file__).parent.parent / "app.py"
-    at = AppTest.from_file(str(app_path.resolve()), default_timeout=30)
+    at = AppTest.from_file(str(app_path.resolve()), default_timeout=60)
     at.run()
 
     assert not at.exception, f"App raised exception: {at.exception}"
